@@ -14,4 +14,42 @@ class MethodChannelBluetoothP2p extends BluetoothP2pPlatform {
     final version = await methodChannel.invokeMethod<String>('getPlatformVersion');
     return version;
   }
+
+  @override
+  Future<bool> isBluetoothEnabled() async {
+    final enabled = await methodChannel.invokeMethod<bool>('isBluetoothEnabled');
+    return enabled ?? false;
+  }
+
+  @override
+  Future<String> startDiscovery() async {
+    final result = await methodChannel.invokeMethod<String>('startDiscovery');
+    return result ?? 'Failed to start discovery';
+  }
+
+  @override
+  Future<String> stopDiscovery() async {
+    final result = await methodChannel.invokeMethod<String>('stopDiscovery');
+    return result ?? 'Failed to stop discovery';
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getDiscoveredDevices() async {
+    final result = await methodChannel.invokeMethod<List>('getDiscoveredDevices');
+    return result?.cast<Map<String, dynamic>>() ?? [];
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getPairedDevices() async {
+    final result = await methodChannel.invokeMethod<List>('getPairedDevices');
+    return result?.cast<Map<String, dynamic>>() ?? [];
+  }
+
+  @override
+  Future<String> connectToDevice(String deviceAddress) async {
+    final result = await methodChannel.invokeMethod<String>('connectToDevice', {
+      'deviceAddress': deviceAddress,
+    });
+    return result ?? 'Failed to connect to device';
+  }
 }
