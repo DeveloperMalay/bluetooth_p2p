@@ -26,4 +26,32 @@ abstract class BluetoothP2pPlatform extends PlatformInterface {
   Future<String?> getPlatformVersion() {
     throw UnimplementedError('platformVersion() has not been implemented.');
   }
+
+  Future<int> getBatteryPercentage() {
+    throw UnimplementedError('getBatteryPercentage() has not been implemented.');
+  }
+
+  Future<bool> isBluetoothEnabled() {
+    throw UnimplementedError('isBluetoothEnabled() has not been implemented.');
+  }
+
+  Future<String> startBluetoothScan() {
+    throw UnimplementedError('startBluetoothScan() has not been implemented.');
+  }
+
+  Future<String> stopBluetoothScan() {
+    throw UnimplementedError('stopBluetoothScan() has not been implemented.');
+  }
+
+  Future<List<Map<String, dynamic>>> getDiscoveredDevices() {
+    throw UnimplementedError('getDiscoveredDevices() has not been implemented.');
+  }
+
+  Future<List<Map<String, dynamic>>> getPairedDevices() {
+    throw UnimplementedError('getPairedDevices() has not been implemented.');
+  }
+
+  Future<String> connectToDevice(String deviceAddress) {
+    throw UnimplementedError('connectToDevice() has not been implemented.');
+  }
 }
