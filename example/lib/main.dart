@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:bluetooth_p2p/bluetooth_p2p.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   runApp(const MyApp());
@@ -17,24 +16,26 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   String _platformVersion = 'Unknown';
+  int _batteryPercentage = 0;
   bool _bluetoothEnabled = false;
-  bool _isDiscovering = false;
+  bool _isScanning = false;
   List<BluetoothDevice> _discoveredDevices = [];
-  List<BluetoothDevice> _pairedDevices = [];
   String _statusMessage = '';
-  String _connectionStatus = '';
 
-  final _bluetoothP2pPlugin = BluetoothP2p();
+  final _bluetoothPlugin = BluetoothP2p();
 
   @override
   void initState() {
     super.initState();
     initPlatformState();
-    _setupBluetoothCallbacks();
+    // Delay callback setup until after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _setupBluetoothCallbacks();
+    });
   }
 
   void _setupBluetoothCallbacks() {
-    _bluetoothP2pPlugin.onDeviceFound = (BluetoothDevice device) {
+    _bluetoothPlugin.onDeviceFound = (BluetoothDevice device) {
       setState(() {
         if (!_discoveredDevices.any((d) => d.address == device.address)) {
           _discoveredDevices.add(device);
@@ -42,165 +43,148 @@ class _MyAppState extends State<MyApp> {
       });
     };
 
-    _bluetoothP2pPlugin.onDiscoveryFinished = () {
+    _bluetoothPlugin.onDiscoveryFinished = (int totalDevices) {
       setState(() {
-        _isDiscovering = false;
-        _statusMessage = 'Discovery finished. Found ${_discoveredDevices.length} devices.';
+        _isScanning = false;
+        _statusMessage = 'Scan finished. Found $totalDevices devices.';
       });
-    };
-
-    _bluetoothP2pPlugin.onConnectionResult = (bool success, String message, String deviceAddress) {
-      setState(() {
-        _connectionStatus = success ? 'Connected to $deviceAddress' : 'Failed: $message';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success ? 'Connected successfully!' : 'Connection failed: $message'),
-          backgroundColor: success ? Colors.green : Colors.red,
-        ),
-      );
     };
   }
 
   Future<void> initPlatformState() async {
     String platformVersion;
+    int batteryPercentage = 0;
     bool bluetoothEnabled = false;
 
     try {
-      platformVersion = await _bluetoothP2pPlugin.getPlatformVersion() ?? 'Unknown platform version';
-      bluetoothEnabled = await _bluetoothP2pPlugin.isBluetoothEnabled();
+      platformVersion = await _bluetoothPlugin.getPlatformVersion() ?? 'Unknown platform version';
+      batteryPercentage = await _bluetoothPlugin.getBatteryPercentage();
+      bluetoothEnabled = await _bluetoothPlugin.isBluetoothEnabled();
     } on PlatformException {
       platformVersion = 'Failed to get platform version.';
+      batteryPercentage = 0;
+      bluetoothEnabled = false;
     }
 
     if (!mounted) return;
 
     setState(() {
       _platformVersion = platformVersion;
+      _batteryPercentage = batteryPercentage;
       _bluetoothEnabled = bluetoothEnabled;
     });
-
-    await _loadPairedDevices();
   }
 
-  Future<void> _requestPermissions() async {
-    Map<Permission, PermissionStatus> statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.bluetoothAdvertise,
-      Permission.location,
-    ].request();
-
-    bool allGranted = statuses.values.every((status) => status == PermissionStatus.granted);
-    
-    if (!allGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Bluetooth permissions are required for this app to work properly.'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+  Future<void> _refreshBatteryPercentage() async {
+    try {
+      final percentage = await _bluetoothPlugin.getBatteryPercentage();
+      setState(() {
+        _batteryPercentage = percentage;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error getting battery percentage: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
-  Future<void> _startDiscovery() async {
-    await _requestPermissions();
-    
+  Future<void> _refreshBluetoothStatus() async {
+    try {
+      final enabled = await _bluetoothPlugin.isBluetoothEnabled();
+      setState(() {
+        _bluetoothEnabled = enabled;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error checking Bluetooth status: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _startBluetoothScan() async {
     try {
       setState(() {
         _discoveredDevices.clear();
-        _isDiscovering = true;
-        _statusMessage = 'Starting discovery...';
+        _isScanning = true;
+        _statusMessage = 'Starting Bluetooth scan...';
       });
 
-      final result = await _bluetoothP2pPlugin.startDiscovery();
+      final result = await _bluetoothPlugin.startBluetoothScan();
       setState(() {
         _statusMessage = result;
       });
     } catch (e) {
       setState(() {
-        _isDiscovering = false;
+        _isScanning = false;
         _statusMessage = 'Error: $e';
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error starting scan: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
-  Future<void> _stopDiscovery() async {
+  Future<void> _stopBluetoothScan() async {
     try {
-      final result = await _bluetoothP2pPlugin.stopDiscovery();
+      final result = await _bluetoothPlugin.stopBluetoothScan();
       setState(() {
-        _isDiscovering = false;
+        _isScanning = false;
         _statusMessage = result;
       });
     } catch (e) {
       setState(() {
-        _statusMessage = 'Error stopping discovery: $e';
+        _statusMessage = 'Error stopping scan: $e';
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error stopping scan: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
-  Future<void> _loadPairedDevices() async {
-    try {
-      final devices = await _bluetoothP2pPlugin.getPairedDevices();
-      setState(() {
-        _pairedDevices = devices;
-      });
-    } catch (e) {
-      setState(() {
-        _statusMessage = 'Error loading paired devices: $e';
-      });
-    }
-  }
-
-  Future<void> _connectToDevice(String deviceAddress) async {
-    try {
-      setState(() {
-        _connectionStatus = 'Connecting...';
-      });
-      
-      final result = await _bluetoothP2pPlugin.connectToDevice(deviceAddress);
-      setState(() {
-        _connectionStatus = result;
-      });
-    } catch (e) {
-      setState(() {
-        _connectionStatus = 'Error: $e';
-      });
-    }
-  }
-
-  Widget _buildDeviceList(String title, List<BluetoothDevice> devices) {
+  Widget _buildDeviceCard(BluetoothDevice device) {
     return Card(
-      margin: const EdgeInsets.all(8.0),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
+      margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
+      child: ListTile(
+        leading: Icon(
+          device.isPaired ? Icons.bluetooth_connected : Icons.bluetooth,
+          color: device.isPaired ? Colors.blue : Colors.grey,
+        ),
+        title: Text(
+          device.name,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              title,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            if (devices.isEmpty)
-              const Text('No devices found')
-            else
-              ...devices.map((device) => ListTile(
-                title: Text(device.name),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Address: ${device.address}'),
-                    Text('Paired: ${device.isPaired ? 'Yes' : 'No'}'),
-                  ],
-                ),
-                trailing: ElevatedButton(
-                  onPressed: () => _connectToDevice(device.address),
-                  child: const Text('Connect'),
-                ),
-              )).toList(),
+            Text('Address: ${device.address}'),
+            Text('Type: ${device.deviceTypeString}'),
+            Text('Paired: ${device.isPaired ? 'Yes' : 'No'}'),
+            if (device.rssi != 'Unknown') Text('RSSI: ${device.rssi}'),
           ],
         ),
+        trailing: device.isPaired 
+          ? const Icon(Icons.verified, color: Colors.green)
+          : const Icon(Icons.info_outline, color: Colors.orange),
       ),
     );
   }
@@ -210,7 +194,7 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       home: Scaffold(
         appBar: AppBar(
-          title: const Text('Bluetooth P2P Example'),
+          title: const Text('Bluetooth Scanner Example'),
           backgroundColor: Colors.blue,
           foregroundColor: Colors.white,
         ),
@@ -219,44 +203,111 @@ class _MyAppState extends State<MyApp> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // System Information Card
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      const Text(
+                        'System Information',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       Text('Platform: $_platformVersion'),
-                      Text('Bluetooth Enabled: $_bluetoothEnabled'),
-                      Text('Discovery Status: ${_isDiscovering ? 'Discovering...' : 'Stopped'}'),
-                      if (_statusMessage.isNotEmpty)
-                        Text('Status: $_statusMessage'),
-                      if (_connectionStatus.isNotEmpty)
-                        Text('Connection: $_connectionStatus'),
+                      Row(
+                        children: [
+                          Text('Battery: $_batteryPercentage%'),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            onPressed: _refreshBatteryPercentage,
+                            child: const Text('Refresh'),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          Text('Bluetooth: ${_bluetoothEnabled ? 'Enabled' : 'Disabled'}'),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            onPressed: _refreshBluetoothStatus,
+                            child: const Text('Check'),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
               ),
+              
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton(
-                    onPressed: _isDiscovering ? null : _startDiscovery,
-                    child: const Text('Start Discovery'),
+              
+              // Bluetooth Scanning Controls
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Bluetooth Scanner',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text('Status: ${_isScanning ? 'Scanning...' : 'Stopped'}'),
+                      if (_statusMessage.isNotEmpty)
+                        Text('Message: $_statusMessage'),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          ElevatedButton(
+                            onPressed: (_isScanning || !_bluetoothEnabled) ? null : _startBluetoothScan,
+                            child: const Text('Start Scan'),
+                          ),
+                          ElevatedButton(
+                            onPressed: !_isScanning ? null : _stopBluetoothScan,
+                            child: const Text('Stop Scan'),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  ElevatedButton(
-                    onPressed: !_isDiscovering ? null : _stopDiscovery,
-                    child: const Text('Stop Discovery'),
-                  ),
-                  ElevatedButton(
-                    onPressed: _loadPairedDevices,
-                    child: const Text('Refresh'),
-                  ),
-                ],
+                ),
               ),
+              
               const SizedBox(height: 16),
-              _buildDeviceList('Paired Devices', _pairedDevices),
-              _buildDeviceList('Discovered Devices', _discoveredDevices),
+              
+              // Discovered Devices
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Discovered Devices (${_discoveredDevices.length})',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (_discoveredDevices.isEmpty)
+                        const Text('No devices found. Start a scan to discover Bluetooth devices.')
+                      else
+                        ..._discoveredDevices.map((device) => _buildDeviceCard(device)).toList(),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),
