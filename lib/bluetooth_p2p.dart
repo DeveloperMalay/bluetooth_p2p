@@ -7,12 +7,14 @@ class BluetoothDevice {
   final String address;
   final int type;
   final int bondState;
+  final String rssi;
 
   BluetoothDevice({
     required this.name,
     required this.address,
     required this.type,
     required this.bondState,
+    this.rssi = 'Unknown',
   });
 
   factory BluetoothDevice.fromMap(Map<String, dynamic> map) {
@@ -21,10 +23,24 @@ class BluetoothDevice {
       address: map['address'] ?? '',
       type: map['type'] ?? 0,
       bondState: map['bondState'] ?? 0,
+      rssi: map['rssi']?.toString() ?? 'Unknown',
     );
   }
 
   bool get isPaired => bondState == 12; // BluetoothDevice.BOND_BONDED = 12
+  
+  String get deviceTypeString {
+    switch (type) {
+      case 1:
+        return 'Classic';
+      case 2:
+        return 'LE';
+      case 3:
+        return 'Dual';
+      default:
+        return 'Unknown';
+    }
+  }
 }
 
 class BluetoothP2p {
@@ -69,16 +85,20 @@ class BluetoothP2p {
     return BluetoothP2pPlatform.instance.getPlatformVersion();
   }
 
+  Future<int> getBatteryPercentage() {
+    return BluetoothP2pPlatform.instance.getBatteryPercentage();
+  }
+
   Future<bool> isBluetoothEnabled() {
     return BluetoothP2pPlatform.instance.isBluetoothEnabled();
   }
 
   Future<String> startDiscovery() {
-    return BluetoothP2pPlatform.instance.startDiscovery();
+    return BluetoothP2pPlatform.instance.startBluetoothScan();
   }
 
   Future<String> stopDiscovery() {
-    return BluetoothP2pPlatform.instance.stopDiscovery();
+    return BluetoothP2pPlatform.instance.stopBluetoothScan();
   }
 
   Future<List<BluetoothDevice>> getDiscoveredDevices() async {

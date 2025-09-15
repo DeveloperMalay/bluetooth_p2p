@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:bluetooth_p2p/bluetooth_p2p.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 void main() {
   runApp(const MyApp());
@@ -19,18 +20,21 @@ class _MyAppState extends State<MyApp> {
   int _batteryPercentage = 0;
   bool _bluetoothEnabled = false;
   bool _isScanning = false;
-  List<BluetoothDevice> _discoveredDevices = [];
+  final List<BluetoothDevice> _discoveredDevices = [];
   String _statusMessage = '';
+  bool _hasPermissions = false;
+  int _permissionAttempts = 0;
+  static const int maxPermissionAttempts = 3;
 
   final _bluetoothPlugin = BluetoothP2p();
 
   @override
   void initState() {
     super.initState();
-    initPlatformState();
-    // Delay callback setup until after first frame
+    // Delay initialization until after first frame when MaterialApp is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setupBluetoothCallbacks();
+      _initializeApp();
     });
   }
 
@@ -43,12 +47,150 @@ class _MyAppState extends State<MyApp> {
       });
     };
 
-    _bluetoothPlugin.onDiscoveryFinished = (int totalDevices) {
+    _bluetoothPlugin.onDiscoveryFinished = () {
       setState(() {
         _isScanning = false;
-        _statusMessage = 'Scan finished. Found $totalDevices devices.';
+        _statusMessage = 'Scan finished. Found ${_discoveredDevices.length} devices.';
       });
     };
+  }
+
+  Future<void> _initializeApp() async {
+    // First request permissions
+    if (await _requestBluetoothPermissions()) {
+      // Only initialize if permissions are granted
+      initPlatformState();
+    }
+  }
+
+  Future<bool> _requestBluetoothPermissions() async {
+    _permissionAttempts++;
+    
+    List<Permission> permissions = [];
+    
+    if (Theme.of(context).platform == TargetPlatform.android) {
+      // Android 12+ permissions
+      if (await _isAndroid12OrHigher()) {
+        permissions.addAll([
+          Permission.bluetoothScan,
+          Permission.bluetoothConnect,
+          Permission.bluetoothAdvertise,
+        ]);
+      } else {
+        // Pre-Android 12 permissions
+        permissions.addAll([
+          Permission.bluetooth,
+          Permission.location,
+        ]);
+      }
+    }
+
+    if (permissions.isEmpty) {
+      setState(() {
+        _hasPermissions = true;
+        _statusMessage = 'Permissions granted (iOS/other platforms)';
+      });
+      return true;
+    }
+
+    Map<Permission, PermissionStatus> statuses = await permissions.request();
+    
+    bool allGranted = statuses.values.every((status) => status.isGranted);
+    
+    setState(() {
+      _hasPermissions = allGranted;
+      if (allGranted) {
+        _statusMessage = 'Bluetooth permissions granted';
+      } else {
+        _statusMessage = 'Some permissions denied (Attempt $_permissionAttempts/$maxPermissionAttempts)';
+      }
+    });
+
+    if (!allGranted && _permissionAttempts < maxPermissionAttempts) {
+      // Show dialog to explain why permissions are needed
+      if (mounted) {
+        await _showPermissionDialog();
+      }
+    } else if (!allGranted) {
+      setState(() {
+        _statusMessage = 'Permissions permanently denied. Please enable them in settings.';
+      });
+      if (mounted) {
+        await _showSettingsDialog();
+      }
+    }
+
+    return allGranted;
+  }
+
+  Future<bool> _isAndroid12OrHigher() async {
+    try {
+      return await Permission.bluetoothScan.isDenied;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<void> _showPermissionDialog() async {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Bluetooth Permissions Required'),
+          content: const Text(
+            'This app needs Bluetooth permissions to scan for and connect to devices. '
+            'Please grant the permissions to continue.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: const Text('Try Again'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                Future.microtask(() => _requestBluetoothPermissions());
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showSettingsDialog() async {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Permissions Required'),
+          content: const Text(
+            'Bluetooth permissions are required for this app to function. '
+            'Please enable them in your device settings.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            TextButton(
+              child: const Text('Open Settings'),
+              onPressed: () {
+                Navigator.of(context).pop();
+                openAppSettings();
+              },
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> initPlatformState() async {
@@ -112,6 +254,17 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _startBluetoothScan() async {
+    // Check permissions first
+    if (!_hasPermissions) {
+      bool granted = await _requestBluetoothPermissions();
+      if (!granted) {
+        setState(() {
+          _statusMessage = 'Permissions required to start scanning';
+        });
+        return;
+      }
+    }
+
     try {
       setState(() {
         _discoveredDevices.clear();
@@ -119,7 +272,7 @@ class _MyAppState extends State<MyApp> {
         _statusMessage = 'Starting Bluetooth scan...';
       });
 
-      final result = await _bluetoothPlugin.startBluetoothScan();
+      final result = await _bluetoothPlugin.startDiscovery();
       setState(() {
         _statusMessage = result;
       });
@@ -129,19 +282,26 @@ class _MyAppState extends State<MyApp> {
         _statusMessage = 'Error: $e';
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error starting scan: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        try {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error starting scan: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        } catch (scaffoldError) {
+          // ScaffoldMessenger not available yet, just update status
+          setState(() {
+            _statusMessage = 'Error starting scan: $e';
+          });
+        }
       }
     }
   }
 
   Future<void> _stopBluetoothScan() async {
     try {
-      final result = await _bluetoothPlugin.stopBluetoothScan();
+      final result = await _bluetoothPlugin.stopDiscovery();
       setState(() {
         _isScanning = false;
         _statusMessage = result;
@@ -151,12 +311,19 @@ class _MyAppState extends State<MyApp> {
         _statusMessage = 'Error stopping scan: $e';
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error stopping scan: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        try {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error stopping scan: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        } catch (scaffoldError) {
+          // ScaffoldMessenger not available yet, just update status
+          setState(() {
+            _statusMessage = 'Error stopping scan: $e';
+          });
+        }
       }
     }
   }
@@ -232,11 +399,23 @@ class _MyAppState extends State<MyApp> {
                       Row(
                         children: [
                           Text('Bluetooth: ${_bluetoothEnabled ? 'Enabled' : 'Disabled'}'),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 16),
+                          Text('Permissions: ${_hasPermissions ? 'Granted' : 'Required'}'),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
                           ElevatedButton(
                             onPressed: _refreshBluetoothStatus,
                             child: const Text('Check'),
                           ),
+                          const SizedBox(width: 8),
+                          if (!_hasPermissions)
+                            ElevatedButton(
+                              onPressed: _requestBluetoothPermissions,
+                              child: const Text('Request Permissions'),
+                            ),
                         ],
                       ),
                     ],
@@ -269,7 +448,7 @@ class _MyAppState extends State<MyApp> {
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
                           ElevatedButton(
-                            onPressed: (_isScanning || !_bluetoothEnabled) ? null : _startBluetoothScan,
+                            onPressed: (_isScanning || !_bluetoothEnabled || !_hasPermissions) ? null : _startBluetoothScan,
                             child: const Text('Start Scan'),
                           ),
                           ElevatedButton(
@@ -303,7 +482,7 @@ class _MyAppState extends State<MyApp> {
                       if (_discoveredDevices.isEmpty)
                         const Text('No devices found. Start a scan to discover Bluetooth devices.')
                       else
-                        ..._discoveredDevices.map((device) => _buildDeviceCard(device)).toList(),
+                        ..._discoveredDevices.map((device) => _buildDeviceCard(device)),
                     ],
                   ),
                 ),
