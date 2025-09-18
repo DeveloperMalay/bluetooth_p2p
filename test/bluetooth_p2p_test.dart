@@ -10,6 +10,42 @@ class MockBluetoothP2pPlatform
 
   @override
   Future<String?> getPlatformVersion() => Future.value('42');
+  
+  @override
+  Future<String> connectToDevice(String deviceAddress) {
+    // TODO: implement connectToDevice
+    throw UnimplementedError();
+  }
+  
+  @override
+  Future<List<Map<String, dynamic>>> getDiscoveredDevices() {
+    // TODO: implement getDiscoveredDevices
+    throw UnimplementedError();
+  }
+  
+  @override
+  Future<List<Map<String, dynamic>>> getPairedDevices() {
+    // TODO: implement getPairedDevices
+    throw UnimplementedError();
+  }
+  
+  @override
+  Future<bool> isBluetoothEnabled() {
+    // TODO: implement isBluetoothEnabled
+    throw UnimplementedError();
+  }
+  
+  @override
+  Future<String> startDiscovery() {
+    // TODO: implement startDiscovery
+    throw UnimplementedError();
+  }
+  
+  @override
+  Future<String> stopDiscovery() {
+    // TODO: implement stopDiscovery
+    throw UnimplementedError();
+  }
 }
 
 void main() {

@@ -19,6 +19,8 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.util.UUID
 
 /** BluetoothP2pPlugin */
@@ -33,6 +35,8 @@ class BluetoothP2pPlugin :
     private var discoveredDevices: MutableList<BluetoothDevice> = mutableListOf()
     private var isDiscovering = false
     private val MY_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+    private var connectedSockets: MutableMap<String, BluetoothSocket> = mutableMapOf()
+    private var messageListeners: MutableMap<String, Thread> = mutableMapOf()
     
     private val discoveryReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -88,6 +92,23 @@ class BluetoothP2pPlugin :
             }
             "getPairedDevices" -> {
                 getPairedDevices(result)
+            }
+            "sendMessage" -> {
+                val message = call.argument<String>("message")
+                val deviceAddress = call.argument<String>("deviceAddress")
+                if (message != null && deviceAddress != null) {
+                    sendMessage(message, deviceAddress, result)
+                } else {
+                    result.error("INVALID_ARGUMENT", "Message and device address are required", null)
+                }
+            }
+            "disconnect" -> {
+                val deviceAddress = call.argument<String>("deviceAddress")
+                if (deviceAddress != null) {
+                    disconnect(deviceAddress, result)
+                } else {
+                    result.error("INVALID_ARGUMENT", "Device address is required", null)
+                }
             }
             else -> {
                 result.notImplemented()
@@ -244,6 +265,12 @@ class BluetoothP2pPlugin :
                     socket = device.createRfcommSocketToServiceRecord(MY_UUID)
                     socket.connect()
                     
+                    // Store the connected socket
+                    connectedSockets[deviceAddress] = socket
+                    
+                    // Start listening for messages
+                    startMessageListener(socket, deviceAddress)
+                    
                     // Connection successful
                     notifyConnectionResult(true, "Connected to ${device.name ?: device.address}", deviceAddress)
                     
@@ -254,6 +281,12 @@ class BluetoothP2pPlugin :
                             .invoke(device, 1) as BluetoothSocket
                         fallbackSocket.connect()
                         socket = fallbackSocket
+                        
+                        // Store the connected socket
+                        connectedSockets[deviceAddress] = fallbackSocket
+                        
+                        // Start listening for messages
+                        startMessageListener(fallbackSocket, deviceAddress)
                         
                         notifyConnectionResult(true, "Connected to ${device.name ?: device.address}", deviceAddress)
                         
@@ -305,5 +338,73 @@ class BluetoothP2pPlugin :
             "deviceAddress" to deviceAddress
         )
         channel.invokeMethod("onConnectionResult", result)
+    }
+
+    private fun sendMessage(message: String, deviceAddress: String, result: Result) {
+        val socket = connectedSockets[deviceAddress]
+        if (socket == null) {
+            result.error("NOT_CONNECTED", "No active connection to device $deviceAddress", null)
+            return
+        }
+
+        Thread {
+            try {
+                val outputStream: OutputStream = socket.outputStream
+                outputStream.write(message.toByteArray())
+                outputStream.flush()
+                result.success(true)
+            } catch (e: IOException) {
+                result.error("SEND_ERROR", "Failed to send message: ${e.message}", null)
+            }
+        }.start()
+    }
+
+    private fun disconnect(deviceAddress: String, result: Result) {
+        val socket = connectedSockets[deviceAddress]
+        val listener = messageListeners[deviceAddress]
+        
+        try {
+            listener?.interrupt()
+            socket?.close()
+            connectedSockets.remove(deviceAddress)
+            messageListeners.remove(deviceAddress)
+            result.success(true)
+        } catch (e: IOException) {
+            result.error("DISCONNECT_ERROR", "Failed to disconnect: ${e.message}", null)
+        }
+    }
+
+    private fun startMessageListener(socket: BluetoothSocket, deviceAddress: String) {
+        val listenerThread = Thread {
+            try {
+                val inputStream: InputStream = socket.inputStream
+                val buffer = ByteArray(1024)
+                
+                while (!Thread.currentThread().isInterrupted) {
+                    try {
+                        val bytesRead = inputStream.read(buffer)
+                        if (bytesRead > 0) {
+                            val message = String(buffer, 0, bytesRead)
+                            notifyMessageReceived(message, deviceAddress)
+                        }
+                    } catch (e: IOException) {
+                        break
+                    }
+                }
+            } catch (e: IOException) {
+                // Connection lost
+            }
+        }
+        
+        messageListeners[deviceAddress] = listenerThread
+        listenerThread.start()
+    }
+
+    private fun notifyMessageReceived(message: String, deviceAddress: String) {
+        val result = mapOf(
+            "message" to message,
+            "deviceAddress" to deviceAddress
+        )
+        channel.invokeMethod("onMessageReceived", result)
     }
 }

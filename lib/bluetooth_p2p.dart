@@ -34,6 +34,7 @@ class BluetoothP2p {
   Function(BluetoothDevice)? onDeviceFound;
   Function()? onDiscoveryFinished;
   Function(bool success, String message, String deviceAddress)? onConnectionResult;
+  Function(String message, String deviceAddress)? onMessageReceived;
 
   BluetoothP2p() {
     _channel.setMethodCallHandler(_handleMethodCall);
@@ -57,6 +58,15 @@ class BluetoothP2p {
           final args = call.arguments as Map;
           onConnectionResult!(
             args['success'] ?? false,
+            args['message'] ?? '',
+            args['deviceAddress'] ?? '',
+          );
+        }
+        break;
+      case 'onMessageReceived':
+        if (onMessageReceived != null) {
+          final args = call.arguments as Map;
+          onMessageReceived!(
             args['message'] ?? '',
             args['deviceAddress'] ?? '',
           );
@@ -93,5 +103,28 @@ class BluetoothP2p {
 
   Future<String> connectToDevice(String deviceAddress) {
     return BluetoothP2pPlatform.instance.connectToDevice(deviceAddress);
+  }
+
+  Future<bool> sendMessage(String message, String deviceAddress) async {
+    try {
+      final result = await _channel.invokeMethod('sendMessage', {
+        'message': message,
+        'deviceAddress': deviceAddress,
+      });
+      return result as bool;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> disconnect(String deviceAddress) async {
+    try {
+      final result = await _channel.invokeMethod('disconnect', {
+        'deviceAddress': deviceAddress,
+      });
+      return result as bool;
+    } catch (e) {
+      return false;
+    }
   }
 }

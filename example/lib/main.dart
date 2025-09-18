@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:bluetooth_p2p/bluetooth_p2p.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'message_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -19,10 +20,11 @@ class _MyAppState extends State<MyApp> {
   String _platformVersion = 'Unknown';
   bool _bluetoothEnabled = false;
   bool _isDiscovering = false;
-  List<BluetoothDevice> _discoveredDevices = [];
+  final List<BluetoothDevice> _discoveredDevices = [];
   List<BluetoothDevice> _pairedDevices = [];
   String _statusMessage = '';
   String _connectionStatus = '';
+  String? _connectedDeviceAddress;
 
   final _bluetoothP2pPlugin = BluetoothP2p();
 
@@ -45,21 +47,32 @@ class _MyAppState extends State<MyApp> {
     _bluetoothP2pPlugin.onDiscoveryFinished = () {
       setState(() {
         _isDiscovering = false;
-        _statusMessage = 'Discovery finished. Found ${_discoveredDevices.length} devices.';
+        _statusMessage =
+            'Discovery finished. Found ${_discoveredDevices.length} devices.';
       });
     };
 
-    _bluetoothP2pPlugin.onConnectionResult = (bool success, String message, String deviceAddress) {
-      setState(() {
-        _connectionStatus = success ? 'Connected to $deviceAddress' : 'Failed: $message';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success ? 'Connected successfully!' : 'Connection failed: $message'),
-          backgroundColor: success ? Colors.green : Colors.red,
-        ),
-      );
-    };
+    _bluetoothP2pPlugin.onConnectionResult =
+        (bool success, String message, String deviceAddress) {
+          setState(() {
+            _connectionStatus = success
+                ? 'Connected to $deviceAddress'
+                : 'Failed: $message';
+            if (success) {
+              _connectedDeviceAddress = deviceAddress;
+            }
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                success
+                    ? 'Connected successfully!'
+                    : 'Connection failed: $message',
+              ),
+              backgroundColor: success ? Colors.green : Colors.red,
+            ),
+          );
+        };
   }
 
   Future<void> initPlatformState() async {
@@ -67,7 +80,9 @@ class _MyAppState extends State<MyApp> {
     bool bluetoothEnabled = false;
 
     try {
-      platformVersion = await _bluetoothP2pPlugin.getPlatformVersion() ?? 'Unknown platform version';
+      platformVersion =
+          await _bluetoothP2pPlugin.getPlatformVersion() ??
+          'Unknown platform version';
       bluetoothEnabled = await _bluetoothP2pPlugin.isBluetoothEnabled();
     } on PlatformException {
       platformVersion = 'Failed to get platform version.';
@@ -91,12 +106,16 @@ class _MyAppState extends State<MyApp> {
       Permission.location,
     ].request();
 
-    bool allGranted = statuses.values.every((status) => status == PermissionStatus.granted);
-    
+    bool allGranted = statuses.values.every(
+      (status) => status == PermissionStatus.granted,
+    );
+
     if (!allGranted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Bluetooth permissions are required for this app to work properly.'),
+          content: Text(
+            'Bluetooth permissions are required for this app to work properly.',
+          ),
           backgroundColor: Colors.orange,
         ),
       );
@@ -105,7 +124,7 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> _startDiscovery() async {
     await _requestPermissions();
-    
+
     try {
       setState(() {
         _discoveredDevices.clear();
@@ -157,7 +176,7 @@ class _MyAppState extends State<MyApp> {
       setState(() {
         _connectionStatus = 'Connecting...';
       });
-      
+
       final result = await _bluetoothP2pPlugin.connectToDevice(deviceAddress);
       setState(() {
         _connectionStatus = result;
@@ -167,6 +186,18 @@ class _MyAppState extends State<MyApp> {
         _connectionStatus = 'Error: $e';
       });
     }
+  }
+
+  void _openMessageScreen(BluetoothDevice device) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => MessageScreen(
+          deviceAddress: device.address,
+          deviceName: device.name,
+        ),
+      ),
+    );
   }
 
   Widget _buildDeviceList(String title, List<BluetoothDevice> devices) {
@@ -185,20 +216,37 @@ class _MyAppState extends State<MyApp> {
             if (devices.isEmpty)
               const Text('No devices found')
             else
-              ...devices.map((device) => ListTile(
-                title: Text(device.name),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Address: ${device.address}'),
-                    Text('Paired: ${device.isPaired ? 'Yes' : 'No'}'),
-                  ],
+              ...devices.map(
+                (device) => ListTile(
+                  title: Text(device.name),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Address: ${device.address}'),
+                      Text('Paired: ${device.isPaired ? 'Yes' : 'No'}'),
+                    ],
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ElevatedButton(
+                        onPressed: () => _connectToDevice(device.address),
+                        child: const Text('Connect'),
+                      ),
+                      const SizedBox(width: 8),
+                      if (_connectedDeviceAddress == device.address)
+                        ElevatedButton(
+                          onPressed: () => _openMessageScreen(device),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('Message'),
+                        ),
+                    ],
+                  ),
                 ),
-                trailing: ElevatedButton(
-                  onPressed: () => _connectToDevice(device.address),
-                  child: const Text('Connect'),
-                ),
-              )).toList(),
+              ),
           ],
         ),
       ),
@@ -227,7 +275,26 @@ class _MyAppState extends State<MyApp> {
                     children: [
                       Text('Platform: $_platformVersion'),
                       Text('Bluetooth Enabled: $_bluetoothEnabled'),
-                      Text('Discovery Status: ${_isDiscovering ? 'Discovering...' : 'Stopped'}'),
+                      Row(
+                        children: [
+                          Text(
+                            'Discovery Status: ${_isDiscovering ? 'Discovering...' : 'Stopped'}',
+                          ),
+                          if (_isDiscovering) ...[
+                            const SizedBox(width: 8),
+                            const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.blue,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                       if (_statusMessage.isNotEmpty)
                         Text('Status: $_statusMessage'),
                       if (_connectionStatus.isNotEmpty)
@@ -237,22 +304,25 @@ class _MyAppState extends State<MyApp> {
                 ),
               ),
               const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton(
-                    onPressed: _isDiscovering ? null : _startDiscovery,
-                    child: const Text('Start Discovery'),
-                  ),
-                  ElevatedButton(
-                    onPressed: !_isDiscovering ? null : _stopDiscovery,
-                    child: const Text('Stop Discovery'),
-                  ),
-                  ElevatedButton(
-                    onPressed: _loadPairedDevices,
-                    child: const Text('Refresh'),
-                  ),
-                ],
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    ElevatedButton(
+                      onPressed: _isDiscovering ? null : _startDiscovery,
+                      child: const Text('Start Discovery'),
+                    ),
+                    ElevatedButton(
+                      onPressed: !_isDiscovering ? null : _stopDiscovery,
+                      child: const Text('Stop Discovery'),
+                    ),
+                    ElevatedButton(
+                      onPressed: _loadPairedDevices,
+                      child: const Text('Refresh'),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 16),
               _buildDeviceList('Paired Devices', _pairedDevices),
