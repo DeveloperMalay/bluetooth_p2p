@@ -133,7 +133,6 @@ class BluetoothP2pPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
     }
 
-    @SuppressLint("MissingPermission")
     private fun startBluetoothScan(result: Result) {
         if (bluetoothAdapter == null) {
             result.error("BLUETOOTH_NOT_AVAILABLE", "Bluetooth is not available on this device", null)
@@ -166,13 +165,19 @@ class BluetoothP2pPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             }
             context?.registerReceiver(discoveryReceiver, filter)
             
-            // Cancel any ongoing discovery
-            if (bluetoothAdapter!!.isDiscovering) {
-                bluetoothAdapter!!.cancelDiscovery()
+            // Double-check permissions before making Bluetooth calls
+            if (hasBluetoothPermissions()) {
+                // Cancel any ongoing discovery
+                if (bluetoothAdapter!!.isDiscovering) {
+                    bluetoothAdapter!!.cancelDiscovery()
+                }
+                
+                // Start discovery
+                isScanning = bluetoothAdapter!!.startDiscovery()
+            } else {
+                result.error("PERMISSION_DENIED", "Bluetooth permissions lost during execution", null)
+                return
             }
-            
-            // Start discovery
-            isScanning = bluetoothAdapter!!.startDiscovery()
             
             if (isScanning) {
                 result.success("Bluetooth scan started successfully")
@@ -185,10 +190,9 @@ class BluetoothP2pPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
     }
 
-    @SuppressLint("MissingPermission")
     private fun stopBluetoothScan(result: Result) {
         try {
-            if (bluetoothAdapter?.isDiscovering == true) {
+            if (hasBluetoothPermissions() && bluetoothAdapter?.isDiscovering == true) {
                 bluetoothAdapter!!.cancelDiscovery()
             }
             
@@ -207,12 +211,16 @@ class BluetoothP2pPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
     }
 
-    @SuppressLint("MissingPermission")
     private fun getDiscoveredDevices(result: Result) {
+        if (!hasBluetoothPermissions()) {
+            result.error("PERMISSION_DENIED", "Bluetooth permissions are not granted", null)
+            return
+        }
+        
         try {
             val deviceList = discoveredDevices.map { device ->
                 mapOf(
-                    "name" to (device.name ?: "Unknown Device"),
+                    "name" to (if (hasBluetoothPermissions()) device.name ?: "Unknown Device" else "Permission Denied"),
                     "address" to device.address,
                     "type" to device.type,
                     "bondState" to device.bondState,
@@ -239,10 +247,11 @@ class BluetoothP2pPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
     }
 
-    @SuppressLint("MissingPermission")
     private fun notifyDeviceFound(device: BluetoothDevice) {
+        if (!hasBluetoothPermissions()) return
+        
         val deviceMap = mapOf(
-            "name" to (device.name ?: "Unknown Device"),
+            "name" to (if (hasBluetoothPermissions()) device.name ?: "Unknown Device" else "Permission Denied"),
             "address" to device.address,
             "type" to device.type,
             "bondState" to device.bondState

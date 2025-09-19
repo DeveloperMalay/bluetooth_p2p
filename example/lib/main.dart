@@ -83,6 +83,12 @@ class _MyAppState extends State<MyApp> {
           Permission.location,
         ]);
       }
+    } else if (Theme.of(context).platform == TargetPlatform.iOS || 
+               Theme.of(context).platform == TargetPlatform.macOS) {
+      // iOS and macOS use the same Bluetooth permissions
+      permissions.addAll([
+        Permission.bluetooth,
+      ]);
     }
 
     if (permissions.isEmpty) {
