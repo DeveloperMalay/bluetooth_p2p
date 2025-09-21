@@ -1,20 +1,17 @@
 
 import 'package:flutter/services.dart';
-import 'bluetooth_p2p_platform_interface.dart';
 
 class BluetoothDevice {
   final String name;
   final String address;
   final int type;
   final int bondState;
-  final String rssi;
 
   BluetoothDevice({
     required this.name,
     required this.address,
     required this.type,
     required this.bondState,
-    this.rssi = 'Unknown',
   });
 
   factory BluetoothDevice.fromMap(Map<String, dynamic> map) {
@@ -23,33 +20,20 @@ class BluetoothDevice {
       address: map['address'] ?? '',
       type: map['type'] ?? 0,
       bondState: map['bondState'] ?? 0,
-      rssi: map['rssi']?.toString() ?? 'Unknown',
     );
   }
 
   bool get isPaired => bondState == 12; // BluetoothDevice.BOND_BONDED = 12
-  
-  String get deviceTypeString {
-    switch (type) {
-      case 1:
-        return 'Classic';
-      case 2:
-        return 'LE';
-      case 3:
-        return 'Dual';
-      default:
-        return 'Unknown';
-    }
-  }
 }
 
 class BluetoothP2p {
   static const MethodChannel _channel = MethodChannel('bluetooth_p2p');
   
-  // Callback functions
+  // Simple callbacks for P2P communication
   Function(BluetoothDevice)? onDeviceFound;
   Function()? onDiscoveryFinished;
   Function(bool success, String message, String deviceAddress)? onConnectionResult;
+  Function(String message)? onMessageReceived;
 
   BluetoothP2p() {
     _channel.setMethodCallHandler(_handleMethodCall);
@@ -78,40 +62,66 @@ class BluetoothP2p {
           );
         }
         break;
+      case 'onMessageReceived':
+        if (onMessageReceived != null) {
+          final message = call.arguments as String;
+          onMessageReceived!(message);
+        }
+        break;
     }
   }
 
-  Future<String?> getPlatformVersion() {
-    return BluetoothP2pPlatform.instance.getPlatformVersion();
+  // Core P2P Methods
+  
+  Future<bool> isBluetoothEnabled() async {
+    final result = await _channel.invokeMethod<bool>('isBluetoothEnabled');
+    return result ?? false;
   }
 
-  Future<int> getBatteryPercentage() {
-    return BluetoothP2pPlatform.instance.getBatteryPercentage();
+  Future<String> startServer() async {
+    final result = await _channel.invokeMethod<String>('startServer');
+    return result ?? 'Failed to start server';
   }
 
-  Future<bool> isBluetoothEnabled() {
-    return BluetoothP2pPlatform.instance.isBluetoothEnabled();
+  Future<String> stopServer() async {
+    final result = await _channel.invokeMethod<String>('stopServer');
+    return result ?? 'Failed to stop server';
   }
 
-  Future<String> startDiscovery() {
-    return BluetoothP2pPlatform.instance.startBluetoothScan();
+  Future<String> startDiscovery() async {
+    final result = await _channel.invokeMethod<String>('startDiscovery');
+    return result ?? 'Failed to start discovery';
   }
 
-  Future<String> stopDiscovery() {
-    return BluetoothP2pPlatform.instance.stopBluetoothScan();
+  Future<String> stopDiscovery() async {
+    final result = await _channel.invokeMethod<String>('stopDiscovery');
+    return result ?? 'Failed to stop discovery';
   }
 
-  Future<List<BluetoothDevice>> getDiscoveredDevices() async {
-    final devices = await BluetoothP2pPlatform.instance.getDiscoveredDevices();
-    return devices.map((device) => BluetoothDevice.fromMap(device)).toList();
+  Future<String> connectToDevice(String deviceAddress) async {
+    final result = await _channel.invokeMethod<String>('connectToDevice', {
+      'deviceAddress': deviceAddress,
+    });
+    return result ?? 'Failed to connect';
   }
 
-  Future<List<BluetoothDevice>> getPairedDevices() async {
-    final devices = await BluetoothP2pPlatform.instance.getPairedDevices();
-    return devices.map((device) => BluetoothDevice.fromMap(device)).toList();
+  Future<bool> sendMessage(String message) async {
+    try {
+      final result = await _channel.invokeMethod('sendMessage', {
+        'message': message,
+      });
+      return result as bool;
+    } catch (e) {
+      return false;
+    }
   }
 
-  Future<String> connectToDevice(String deviceAddress) {
-    return BluetoothP2pPlatform.instance.connectToDevice(deviceAddress);
+  Future<bool> disconnect() async {
+    try {
+      final result = await _channel.invokeMethod('disconnect');
+      return result as bool;
+    } catch (e) {
+      return false;
+    }
   }
 }

@@ -58,4 +58,22 @@ class MethodChannelBluetoothP2p extends BluetoothP2pPlatform {
     });
     return result ?? 'Failed to connect to device';
   }
+
+  @override
+  Future<String> startServer() async {
+    final result = await methodChannel.invokeMethod<String>('startServer');
+    return result ?? 'Failed to start server';
+  }
+
+  @override
+  Future<String> stopServer() async {
+    final result = await methodChannel.invokeMethod<String>('stopServer');
+    return result ?? 'Failed to stop server';
+  }
+
+  @override
+  Future<String> makeDiscoverable() async {
+    final result = await methodChannel.invokeMethod<String>('makeDiscoverable');
+    return result ?? 'Failed to make discoverable';
+  }
 }
