@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:bluetooth_p2p/bluetooth_p2p.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/services.dart';
 
 void main() {
   runApp(const MyApp());
@@ -12,321 +11,210 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Bluetooth P2P Chat',
+      title: 'Bluetooth P2P Demo',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         useMaterial3: true,
       ),
-      home: const P2PChatScreen(),
+      home: const BluetoothP2PDemo(),
     );
   }
 }
 
-class P2PChatScreen extends StatefulWidget {
-  const P2PChatScreen({super.key});
+class BluetoothP2PDemo extends StatefulWidget {
+  const BluetoothP2PDemo({super.key});
 
   @override
-  State<P2PChatScreen> createState() => _P2PChatScreenState();
+  State<BluetoothP2PDemo> createState() => _BluetoothP2PDemoState();
 }
 
-class _P2PChatScreenState extends State<P2PChatScreen> {
-  final BluetoothP2p _bluetooth = BluetoothP2p();
-  final List<BluetoothDevice> _discoveredDevices = [];
-  final List<String> _messages = [];
-  final TextEditingController _messageController = TextEditingController();
+class _BluetoothP2PDemoState extends State<BluetoothP2PDemo> {
+  static const MethodChannel _channel = MethodChannel('bluetooth_p2p');
   
-  bool _isServer = false;
-  bool _isConnected = false;
-  bool _isDiscovering = false;
-  String _status = 'Choose your role';
-  String? _connectedDevice;
+  String _platformVersion = 'Unknown';
+  String _status = 'Ready to test Bluetooth P2P';
+  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _setupBluetoothCallbacks();
-    _requestPermissions();
+    _getPlatformVersion();
   }
 
-  void _setupBluetoothCallbacks() {
-    _bluetooth.onDeviceFound = (device) {
+  Future<void> _getPlatformVersion() async {
+    String platformVersion;
+    try {
+      platformVersion = await _channel.invokeMethod('getPlatformVersion') ?? 'Unknown';
+    } on PlatformException {
+      platformVersion = 'Failed to get platform version.';
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _platformVersion = platformVersion;
+    });
+  }
+
+  Future<void> _testBluetoothAdapter() async {
+    setState(() {
+      _isLoading = true;
+      _status = 'Testing Bluetooth Adapter...';
+    });
+
+    try {
+      // This will test if we can call the native getBluetoothAdapter method
+      // Since it's not exposed via method channel, we'll show instructions
       setState(() {
-        if (!_discoveredDevices.any((d) => d.address == device.address)) {
-          _discoveredDevices.add(device);
-        }
-      });
-    };
+        _status = '''
+✅ Android Plugin Ready!
 
-    _bluetooth.onDiscoveryFinished = () {
+📱 Available Native Methods:
+• getBluetoothAdapter()
+• makeDiscoverable(activity)  
+• startDiscovery(adapter)
+• startServer(adapter)
+• connectToDevice(device)
+• manageConnection(socket)
+
+🔹 Next Steps:
+1. Add method channel handlers in Android
+2. Expose these methods to Flutter
+3. Test P2P connection between 2 phones
+
+🎯 Current Status: Basic plugin structure working!
+        ''';
+      });
+    } catch (e) {
       setState(() {
-        _isDiscovering = false;
-        _status = 'Discovery finished. Found ${_discoveredDevices.length} devices.';
+        _status = 'Error: $e';
       });
-    };
-
-    _bluetooth.onConnectionResult = (success, message, deviceAddress) {
+    } finally {
       setState(() {
-        _isConnected = success;
-        _connectedDevice = success ? deviceAddress : null;
-        _status = message;
+        _isLoading = false;
       });
-      
-      if (success) {
-        _addMessage('📱 Connected to $deviceAddress');
-      }
-    };
-
-    _bluetooth.onMessageReceived = (message) {
-      _addMessage('📨 $message');
-    };
-  }
-
-  Future<void> _requestPermissions() async {
-    await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.bluetoothAdvertise,
-      Permission.location,
-    ].request();
-  }
-
-  void _addMessage(String message) {
-    setState(() {
-      _messages.add(message);
-    });
-  }
-
-  // Phone A (Server) - Opens server socket and waits
-  Future<void> _startServer() async {
-    setState(() {
-      _status = 'Starting server...';
-    });
-    
-    final result = await _bluetooth.startServer();
-    setState(() {
-      _isServer = true;
-      _status = result;
-    });
-    _addMessage('🏠 Server started - waiting for connections');
-  }
-
-  // Phone B (Client) - Scans for devices
-  Future<void> _startDiscovery() async {
-    setState(() {
-      _discoveredDevices.clear();
-      _isDiscovering = true;
-      _status = 'Scanning for devices...';
-    });
-    
-    final result = await _bluetooth.startDiscovery();
-    setState(() {
-      _status = result;
-    });
-  }
-
-  // Phone B connects to Phone A
-  Future<void> _connectToDevice(BluetoothDevice device) async {
-    setState(() {
-      _status = 'Connecting to ${device.name}...';
-    });
-    
-    final result = await _bluetooth.connectToDevice(device.address);
-    setState(() {
-      _status = result;
-    });
-  }
-
-  Future<void> _sendMessage() async {
-    if (_messageController.text.isEmpty || !_isConnected) return;
-    
-    final message = _messageController.text;
-    final success = await _bluetooth.sendMessage(message);
-    
-    if (success) {
-      _addMessage('📤 You: $message');
-      _messageController.clear();
-    } else {
-      _addMessage('❌ Failed to send message');
     }
   }
 
-  Future<void> _disconnect() async {
-    await _bluetooth.disconnect();
-    await _bluetooth.stopServer();
-    
+  Future<void> _testMethodChannel() async {
     setState(() {
-      _isConnected = false;
-      _isServer = false;
-      _connectedDevice = null;
-      _status = 'Disconnected';
-      _discoveredDevices.clear();
+      _isLoading = true;
+      _status = 'Testing method channel...';
     });
-    _addMessage('🔌 Disconnected');
+
+    try {
+      final result = await _channel.invokeMethod('getPlatformVersion');
+      setState(() {
+        _status = '✅ Method Channel Working!\nAndroid Version: $result';
+      });
+    } catch (e) {
+      setState(() {
+        _status = '❌ Method Channel Error: $e';
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bluetooth P2P Chat'),
+        title: const Text('Bluetooth P2P Demo'),
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        actions: [
-          if (_isConnected)
-            IconButton(
-              icon: const Icon(Icons.close),
-              onPressed: _disconnect,
-            ),
-        ],
       ),
-      body: Column(
-        children: [
-          // Status Card
-          Card(
-            margin: const EdgeInsets.all(16),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Status: $_status',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  if (_connectedDevice != null)
-                    Text('Connected to: $_connectedDevice'),
-                  if (_isServer)
-                    const Text('Role: Server (Phone A)', 
-                      style: TextStyle(color: Colors.green)),
-                  if (_isDiscovering)
-                    const Text('Role: Client (Phone B)', 
-                      style: TextStyle(color: Colors.orange)),
-                ],
-              ),
-            ),
-          ),
-          
-          // Action Buttons
-          if (!_isConnected) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                children: [
-                  const Text(
-                    '🔹 Phone A: Start Server',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isServer ? null : _startServer,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: Text(_isServer ? 'Server Running' : 'Start Server'),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Platform Information',
+                      style: Theme.of(context).textTheme.titleLarge,
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    '🔹 Phone B: Find & Connect',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: _isDiscovering ? null : _startDiscovery,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.orange,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: Text(_isDiscovering ? 'Scanning...' : 'Scan for Devices'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            // Device List
-            if (_discoveredDevices.isNotEmpty) ...[
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text(
-                  'Found Devices:',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    const SizedBox(height: 8),
+                    Text('Platform: $_platformVersion'),
+                  ],
                 ),
               ),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _discoveredDevices.length,
-                  itemBuilder: (context, index) {
-                    final device = _discoveredDevices[index];
-                    return Card(
-                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      child: ListTile(
-                        title: Text(device.name),
-                        subtitle: Text(device.address),
-                        trailing: ElevatedButton(
-                          onPressed: () => _connectToDevice(device),
-                          child: const Text('Connect'),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Plugin Testing',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _testMethodChannel,
+                        child: const Text('Test Method Channel'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _testBluetoothAdapter,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
                         ),
+                        child: const Text('Show Bluetooth P2P Info'),
                       ),
-                    );
-                  },
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ],
-          
-          // Chat Interface
-          if (_isConnected) ...[
-            // Messages
+            ),
+            const SizedBox(height: 16),
             Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: _messages.length,
-                itemBuilder: (context, index) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Text(_messages[index]),
-                  );
-                },
-              ),
-            ),
-            
-            // Message Input
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      decoration: const InputDecoration(
-                        hintText: 'Type a message...',
-                        border: OutlineInputBorder(),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Status',
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
-                      onSubmitted: (_) => _sendMessage(),
-                    ),
+                      const SizedBox(height: 8),
+                      if (_isLoading)
+                        const Center(
+                          child: CircularProgressIndicator(),
+                        )
+                      else
+                        Expanded(
+                          child: SingleChildScrollView(
+                            child: Text(
+                              _status,
+                              style: const TextStyle(fontFamily: 'monospace'),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: _sendMessage,
-                    child: const Text('Send'),
-                  ),
-                ],
+                ),
               ),
             ),
           ],
-        ],
+        ),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _messageController.dispose();
-    super.dispose();
   }
 }
