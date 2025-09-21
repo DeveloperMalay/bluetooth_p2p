@@ -1,42 +1,55 @@
 import 'package:flutter/material.dart';
-import 'dart:async';
-import 'package:flutter/services.dart';
 import 'package:bluetooth_p2p/bluetooth_p2p.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'message_screen.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatefulWidget {
+class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
-  State<MyApp> createState() => _MyAppState();
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Bluetooth P2P Chat',
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        useMaterial3: true,
+      ),
+      home: const P2PChatScreen(),
+    );
+  }
 }
 
-class _MyAppState extends State<MyApp> {
-  String _platformVersion = 'Unknown';
-  bool _bluetoothEnabled = false;
-  bool _isDiscovering = false;
-  final List<BluetoothDevice> _discoveredDevices = [];
-  List<BluetoothDevice> _pairedDevices = [];
-  String _statusMessage = '';
-  String _connectionStatus = '';
-  String? _connectedDeviceAddress;
+class P2PChatScreen extends StatefulWidget {
+  const P2PChatScreen({super.key});
 
-  final _bluetoothP2pPlugin = BluetoothP2p();
+  @override
+  State<P2PChatScreen> createState() => _P2PChatScreenState();
+}
+
+class _P2PChatScreenState extends State<P2PChatScreen> {
+  final BluetoothP2p _bluetooth = BluetoothP2p();
+  final List<BluetoothDevice> _discoveredDevices = [];
+  final List<String> _messages = [];
+  final TextEditingController _messageController = TextEditingController();
+  
+  bool _isServer = false;
+  bool _isConnected = false;
+  bool _isDiscovering = false;
+  String _status = 'Choose your role';
+  String? _connectedDevice;
 
   @override
   void initState() {
     super.initState();
-    initPlatformState();
     _setupBluetoothCallbacks();
+    _requestPermissions();
   }
 
   void _setupBluetoothCallbacks() {
-    _bluetoothP2pPlugin.onDeviceFound = (BluetoothDevice device) {
+    _bluetooth.onDeviceFound = (device) {
       setState(() {
         if (!_discoveredDevices.any((d) => d.address == device.address)) {
           _discoveredDevices.add(device);
@@ -44,293 +57,276 @@ class _MyAppState extends State<MyApp> {
       });
     };
 
-    _bluetoothP2pPlugin.onDiscoveryFinished = () {
+    _bluetooth.onDiscoveryFinished = () {
       setState(() {
         _isDiscovering = false;
-        _statusMessage =
-            'Discovery finished. Found ${_discoveredDevices.length} devices.';
+        _status = 'Discovery finished. Found ${_discoveredDevices.length} devices.';
       });
     };
 
-    _bluetoothP2pPlugin.onConnectionResult =
-        (bool success, String message, String deviceAddress) {
-          setState(() {
-            _connectionStatus = success
-                ? 'Connected to $deviceAddress'
-                : 'Failed: $message';
-            if (success) {
-              _connectedDeviceAddress = deviceAddress;
-            }
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                success
-                    ? 'Connected successfully!'
-                    : 'Connection failed: $message',
-              ),
-              backgroundColor: success ? Colors.green : Colors.red,
-            ),
-          );
-        };
-  }
+    _bluetooth.onConnectionResult = (success, message, deviceAddress) {
+      setState(() {
+        _isConnected = success;
+        _connectedDevice = success ? deviceAddress : null;
+        _status = message;
+      });
+      
+      if (success) {
+        _addMessage('📱 Connected to $deviceAddress');
+      }
+    };
 
-  Future<void> initPlatformState() async {
-    String platformVersion;
-    bool bluetoothEnabled = false;
-
-    try {
-      platformVersion =
-          await _bluetoothP2pPlugin.getPlatformVersion() ??
-          'Unknown platform version';
-      bluetoothEnabled = await _bluetoothP2pPlugin.isBluetoothEnabled();
-    } on PlatformException {
-      platformVersion = 'Failed to get platform version.';
-    }
-
-    if (!mounted) return;
-
-    setState(() {
-      _platformVersion = platformVersion;
-      _bluetoothEnabled = bluetoothEnabled;
-    });
-
-    await _loadPairedDevices();
+    _bluetooth.onMessageReceived = (message) {
+      _addMessage('📨 $message');
+    };
   }
 
   Future<void> _requestPermissions() async {
-    Map<Permission, PermissionStatus> statuses = await [
+    await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
       Permission.bluetoothAdvertise,
       Permission.location,
     ].request();
-
-    bool allGranted = statuses.values.every(
-      (status) => status == PermissionStatus.granted,
-    );
-
-    if (!allGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Bluetooth permissions are required for this app to work properly.',
-          ),
-          backgroundColor: Colors.orange,
-        ),
-      );
-    }
   }
 
+  void _addMessage(String message) {
+    setState(() {
+      _messages.add(message);
+    });
+  }
+
+  // Phone A (Server) - Opens server socket and waits
+  Future<void> _startServer() async {
+    setState(() {
+      _status = 'Starting server...';
+    });
+    
+    final result = await _bluetooth.startServer();
+    setState(() {
+      _isServer = true;
+      _status = result;
+    });
+    _addMessage('🏠 Server started - waiting for connections');
+  }
+
+  // Phone B (Client) - Scans for devices
   Future<void> _startDiscovery() async {
-    await _requestPermissions();
+    setState(() {
+      _discoveredDevices.clear();
+      _isDiscovering = true;
+      _status = 'Scanning for devices...';
+    });
+    
+    final result = await _bluetooth.startDiscovery();
+    setState(() {
+      _status = result;
+    });
+  }
 
-    try {
-      setState(() {
-        _discoveredDevices.clear();
-        _isDiscovering = true;
-        _statusMessage = 'Starting discovery...';
-      });
+  // Phone B connects to Phone A
+  Future<void> _connectToDevice(BluetoothDevice device) async {
+    setState(() {
+      _status = 'Connecting to ${device.name}...';
+    });
+    
+    final result = await _bluetooth.connectToDevice(device.address);
+    setState(() {
+      _status = result;
+    });
+  }
 
-      final result = await _bluetoothP2pPlugin.startDiscovery();
-      setState(() {
-        _statusMessage = result;
-      });
-    } catch (e) {
-      setState(() {
-        _isDiscovering = false;
-        _statusMessage = 'Error: $e';
-      });
+  Future<void> _sendMessage() async {
+    if (_messageController.text.isEmpty || !_isConnected) return;
+    
+    final message = _messageController.text;
+    final success = await _bluetooth.sendMessage(message);
+    
+    if (success) {
+      _addMessage('📤 You: $message');
+      _messageController.clear();
+    } else {
+      _addMessage('❌ Failed to send message');
     }
   }
 
-  Future<void> _stopDiscovery() async {
-    try {
-      final result = await _bluetoothP2pPlugin.stopDiscovery();
-      setState(() {
-        _isDiscovering = false;
-        _statusMessage = result;
-      });
-    } catch (e) {
-      setState(() {
-        _statusMessage = 'Error stopping discovery: $e';
-      });
-    }
+  Future<void> _disconnect() async {
+    await _bluetooth.disconnect();
+    await _bluetooth.stopServer();
+    
+    setState(() {
+      _isConnected = false;
+      _isServer = false;
+      _connectedDevice = null;
+      _status = 'Disconnected';
+      _discoveredDevices.clear();
+    });
+    _addMessage('🔌 Disconnected');
   }
 
-  Future<void> _loadPairedDevices() async {
-    try {
-      final devices = await _bluetoothP2pPlugin.getPairedDevices();
-      setState(() {
-        _pairedDevices = devices;
-      });
-    } catch (e) {
-      setState(() {
-        _statusMessage = 'Error loading paired devices: $e';
-      });
-    }
-  }
-
-  Future<void> _connectToDevice(String deviceAddress) async {
-    try {
-      setState(() {
-        _connectionStatus = 'Connecting...';
-      });
-
-      final result = await _bluetoothP2pPlugin.connectToDevice(deviceAddress);
-      setState(() {
-        _connectionStatus = result;
-      });
-    } catch (e) {
-      setState(() {
-        _connectionStatus = 'Error: $e';
-      });
-    }
-  }
-
-  void _openMessageScreen(BluetoothDevice device) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => MessageScreen(
-          deviceAddress: device.address,
-          deviceName: device.name,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDeviceList(String title, List<BluetoothDevice> devices) {
-    return Card(
-      margin: const EdgeInsets.all(8.0),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Bluetooth P2P Chat'),
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        actions: [
+          if (_isConnected)
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: _disconnect,
             ),
-            const SizedBox(height: 8),
-            if (devices.isEmpty)
-              const Text('No devices found')
-            else
-              ...devices.map(
-                (device) => ListTile(
-                  title: Text(device.name),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Address: ${device.address}'),
-                      Text('Paired: ${device.isPaired ? 'Yes' : 'No'}'),
-                    ],
+        ],
+      ),
+      body: Column(
+        children: [
+          // Status Card
+          Card(
+            margin: const EdgeInsets.all(16),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Status: $_status',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ElevatedButton(
-                        onPressed: () => _connectToDevice(device.address),
-                        child: const Text('Connect'),
+                  if (_connectedDevice != null)
+                    Text('Connected to: $_connectedDevice'),
+                  if (_isServer)
+                    const Text('Role: Server (Phone A)', 
+                      style: TextStyle(color: Colors.green)),
+                  if (_isDiscovering)
+                    const Text('Role: Client (Phone B)', 
+                      style: TextStyle(color: Colors.orange)),
+                ],
+              ),
+            ),
+          ),
+          
+          // Action Buttons
+          if (!_isConnected) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                children: [
+                  const Text(
+                    '🔹 Phone A: Start Server',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _isServer ? null : _startServer,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
                       ),
-                      const SizedBox(width: 8),
-                      if (_connectedDeviceAddress == device.address)
-                        ElevatedButton(
-                          onPressed: () => _openMessageScreen(device),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text('Message'),
-                        ),
-                    ],
+                      child: Text(_isServer ? 'Server Running' : 'Start Server'),
+                    ),
                   ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '🔹 Phone B: Find & Connect',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _isDiscovering ? null : _startDiscovery,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: Text(_isDiscovering ? 'Scanning...' : 'Scan for Devices'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
+            // Device List
+            if (_discoveredDevices.isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Found Devices:',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
               ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _discoveredDevices.length,
+                  itemBuilder: (context, index) {
+                    final device = _discoveredDevices[index];
+                    return Card(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      child: ListTile(
+                        title: Text(device.name),
+                        subtitle: Text(device.address),
+                        trailing: ElevatedButton(
+                          onPressed: () => _connectToDevice(device),
+                          child: const Text('Connect'),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           ],
-        ),
+          
+          // Chat Interface
+          if (_isConnected) ...[
+            // Messages
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: _messages.length,
+                itemBuilder: (context, index) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(_messages[index]),
+                  );
+                },
+              ),
+            ),
+            
+            // Message Input
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _messageController,
+                      decoration: const InputDecoration(
+                        hintText: 'Type a message...',
+                        border: OutlineInputBorder(),
+                      ),
+                      onSubmitted: (_) => _sendMessage(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: _sendMessage,
+                    child: const Text('Send'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      home: Scaffold(
-        appBar: AppBar(
-          title: const Text('Bluetooth P2P Example'),
-          backgroundColor: Colors.blue,
-          foregroundColor: Colors.white,
-        ),
-        body: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Platform: $_platformVersion'),
-                      Text('Bluetooth Enabled: $_bluetoothEnabled'),
-                      Row(
-                        children: [
-                          Text(
-                            'Discovery Status: ${_isDiscovering ? 'Discovering...' : 'Stopped'}',
-                          ),
-                          if (_isDiscovering) ...[
-                            const SizedBox(width: 8),
-                            const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.blue,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      if (_statusMessage.isNotEmpty)
-                        Text('Status: $_statusMessage'),
-                      if (_connectionStatus.isNotEmpty)
-                        Text('Connection: $_connectionStatus'),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    ElevatedButton(
-                      onPressed: _isDiscovering ? null : _startDiscovery,
-                      child: const Text('Start Discovery'),
-                    ),
-                    ElevatedButton(
-                      onPressed: !_isDiscovering ? null : _stopDiscovery,
-                      child: const Text('Stop Discovery'),
-                    ),
-                    ElevatedButton(
-                      onPressed: _loadPairedDevices,
-                      child: const Text('Refresh'),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              _buildDeviceList('Paired Devices', _pairedDevices),
-              _buildDeviceList('Discovered Devices', _discoveredDevices),
-            ],
-          ),
-        ),
-      ),
-    );
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
   }
 }

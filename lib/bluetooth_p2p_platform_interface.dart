@@ -50,4 +50,16 @@ abstract class BluetoothP2pPlatform extends PlatformInterface {
   Future<String> connectToDevice(String deviceAddress) {
     throw UnimplementedError('connectToDevice() has not been implemented.');
   }
+
+  Future<String> startServer() {
+    throw UnimplementedError('startServer() has not been implemented.');
+  }
+
+  Future<String> stopServer() {
+    throw UnimplementedError('stopServer() has not been implemented.');
+  }
+
+  Future<String> makeDiscoverable() {
+    throw UnimplementedError('makeDiscoverable() has not been implemented.');
+  }
 }
