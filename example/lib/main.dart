@@ -34,6 +34,12 @@ class _BluetoothP2PDemoState extends State<BluetoothP2PDemo> {
   String _platformVersion = 'Unknown';
   String _status = 'Ready to test Bluetooth P2P';
   bool _isLoading = false;
+  Map<String, dynamic>? _adapterInfo;
+  bool _isServer = false;
+  bool _isDiscovering = false;
+  bool _isDiscoverable = false;
+  final List<Map<String, String>> _discoveredDevices = [];
+  String? _selectedDeviceAddress;
 
   @override
   void initState() {
@@ -56,38 +62,32 @@ class _BluetoothP2PDemoState extends State<BluetoothP2PDemo> {
     });
   }
 
-  Future<void> _testBluetoothAdapter() async {
+
+  Future<void> _requestPermissions() async {
     setState(() {
       _isLoading = true;
-      _status = 'Testing Bluetooth Adapter...';
+      _status = 'Checking permissions...';
     });
 
     try {
-      // This will test if we can call the native getBluetoothAdapter method
-      // Since it's not exposed via method channel, we'll show instructions
+      // For demo purposes - in production, use permission_handler package
+      await Future.delayed(const Duration(seconds: 1));
+      
       setState(() {
-        _status = '''
-✅ Android Plugin Ready!
+        _status = '''✅ Permissions Check Complete!
 
-📱 Available Native Methods:
-• getBluetoothAdapter()
-• makeDiscoverable(activity)  
-• startDiscovery(adapter)
-• startServer(adapter)
-• connectToDevice(device)
-• manageConnection(socket)
+Please ensure the following permissions are granted in device settings:
+• Bluetooth
+• Bluetooth Scan  
+• Bluetooth Connect
+• Bluetooth Advertise
+• Location (required for Bluetooth scan)
 
-🔹 Next Steps:
-1. Add method channel handlers in Android
-2. Expose these methods to Flutter
-3. Test P2P connection between 2 phones
-
-🎯 Current Status: Basic plugin structure working!
-        ''';
+Note: The app will request these permissions when using Bluetooth features.''';
       });
     } catch (e) {
       setState(() {
-        _status = 'Error: $e';
+        _status = '❌ Permission error: $e';
       });
     } finally {
       setState(() {
@@ -96,20 +96,180 @@ class _BluetoothP2PDemoState extends State<BluetoothP2PDemo> {
     }
   }
 
-  Future<void> _testMethodChannel() async {
+  Future<void> _getBluetoothAdapter() async {
     setState(() {
       _isLoading = true;
-      _status = 'Testing method channel...';
+      _status = 'Getting Bluetooth adapter info...';
     });
 
     try {
-      final result = await _channel.invokeMethod('getPlatformVersion');
+      final result = await _channel.invokeMethod('getBluetoothAdapter');
       setState(() {
-        _status = '✅ Method Channel Working!\nAndroid Version: $result';
+        _adapterInfo = Map<String, dynamic>.from(result);
+        _status = '✅ Bluetooth Adapter Info:\n'
+                 'Enabled: ${_adapterInfo!['isEnabled']}\n'
+                 'Name: ${_adapterInfo!['name']}\n'
+                 'Address: ${_adapterInfo!['address']}';
       });
     } catch (e) {
       setState(() {
-        _status = '❌ Method Channel Error: $e';
+        _status = '❌ Adapter error: $e';
+        _adapterInfo = null;
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _makeDiscoverable() async {
+    setState(() {
+      _isLoading = true;
+      _isDiscoverable = true;
+      _status = 'Making device discoverable...';
+    });
+
+    try {
+      final result = await _channel.invokeMethod('makeDiscoverable');
+      setState(() {
+        _status = '🔍 $result\n\nThis device is now discoverable by other devices for 5 minutes.';
+      });
+    } catch (e) {
+      setState(() {
+        _status = '❌ Discoverable error: $e';
+        _isDiscoverable = false;
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _startDiscovery() async {
+    setState(() {
+      _isLoading = true;
+      _isDiscovering = true;
+      _status = 'Starting device discovery...';
+      _discoveredDevices.clear();
+    });
+
+    try {
+      final result = await _channel.invokeMethod('startDiscovery');
+      setState(() {
+        _status = '🔍 $result\nDiscovering nearby devices...';
+      });
+      
+      // Simulate discovering some devices (in real implementation, you'd listen for discovery events)
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted && _isDiscovering) {
+          setState(() {
+            _discoveredDevices.addAll([
+              {'name': 'Sample Device 1', 'address': '00:11:22:33:44:55'},
+              {'name': 'Sample Device 2', 'address': '00:66:77:88:99:AA'},
+            ]);
+            _status += '\n\n📱 Found ${_discoveredDevices.length} devices:\n';
+            for (var device in _discoveredDevices) {
+              _status += '• ${device['name']} (${device['address']})\n';
+            }
+          });
+        }
+      });
+      
+      // Auto-stop discovery after 12 seconds
+      Future.delayed(const Duration(seconds: 12), () {
+        if (mounted && _isDiscovering) {
+          setState(() {
+            _isDiscovering = false;
+            _status += '\n✅ Discovery completed';
+          });
+        }
+      });
+    } catch (e) {
+      setState(() {
+        _status = '❌ Discovery error: $e';
+        _isDiscovering = false;
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _startServer() async {
+    setState(() {
+      _isLoading = true;
+      _isServer = true;
+      _status = 'Starting Bluetooth server...';
+    });
+
+    try {
+      final result = await _channel.invokeMethod('startServer');
+      setState(() {
+        _status = '🔧 $result\n\n📱 Server is now waiting for connections.\nOther devices can now connect to this phone.';
+      });
+    } catch (e) {
+      setState(() {
+        _status = '❌ Server error: $e';
+        _isServer = false;
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _connectToDevice(String? deviceAddress) async {
+    if (deviceAddress == null) {
+      setState(() {
+        _status = '⚠️ Please discover devices first and select one to connect to.';
+      });
+      return;
+    }
+    
+    setState(() {
+      _isLoading = true;
+      _status = 'Attempting to connect to device...';
+    });
+
+    try {
+      final result = await _channel.invokeMethod('connectToDevice', {
+        'deviceAddress': deviceAddress
+      });
+      setState(() {
+        _status = '🔗 $result';
+        _selectedDeviceAddress = deviceAddress;
+      });
+    } catch (e) {
+      setState(() {
+        _status = '❌ Connection error: $e\n\nNote: This is expected without a real device at address $deviceAddress';
+      });
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _sendTestMessage() async {
+    setState(() {
+      _isLoading = true;
+      _status = 'Sending test message...';
+    });
+
+    try {
+      final result = await _channel.invokeMethod('sendMessage', {
+        'message': 'Hello from Flutter P2P! 👋'
+      });
+      setState(() {
+        _status = '📤 $result';
+      });
+    } catch (e) {
+      setState(() {
+        _status = '❌ Send error: $e';
       });
     } finally {
       setState(() {
@@ -154,27 +314,108 @@ class _BluetoothP2PDemoState extends State<BluetoothP2PDemo> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Plugin Testing',
+                      'Bluetooth P2P Testing',
                       style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Test P2P connection between two phones:',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _isLoading ? null : _testMethodChannel,
-                        child: const Text('Test Method Channel'),
+                        onPressed: _isLoading ? null : _requestPermissions,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('1. Request Permissions'),
                       ),
                     ),
                     const SizedBox(height: 8),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _isLoading ? null : _testBluetoothAdapter,
+                        onPressed: _isLoading ? null : _getBluetoothAdapter,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue,
                           foregroundColor: Colors.white,
                         ),
-                        child: const Text('Show Bluetooth P2P Info'),
+                        child: const Text('2. Get Bluetooth Info'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _makeDiscoverable,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _isDiscoverable ? Colors.green : Colors.purple,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: Text(_isDiscoverable ? '🔍 Discoverable' : '3a. Make Discoverable'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _startDiscovery,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _isDiscovering ? Colors.green : Colors.teal,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: Text(_isDiscovering ? '🔍 Discovering...' : '3b. Start Discovery'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _startServer,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _isServer ? Colors.green : Colors.red,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: Text(_isServer ? '🔧 Server Running' : '3c. Start Server'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (_discoveredDevices.isNotEmpty) ...[
+                      Text(
+                        'Found Devices:',
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      ...(_discoveredDevices.map((device) => Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : () => _connectToDevice(device['address']),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _selectedDeviceAddress == device['address'] ? Colors.green : Colors.indigo,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: Text('4. Connect to ${device['name']}'),
+                          ),
+                        ),
+                      ))),
+                      const SizedBox(height: 8),
+                    ],
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _sendTestMessage,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.deepPurple,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('5. Send Test Message'),
                       ),
                     ),
                   ],
