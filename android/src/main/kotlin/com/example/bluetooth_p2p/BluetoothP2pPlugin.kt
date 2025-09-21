@@ -112,6 +112,28 @@ class BluetoothP2pPlugin: FlutterPlugin, MethodCallHandler {
           result.error("DISCOVERABLE_ERROR", e.message, null)
         }
       }
+      "getDiscoveredDevices" -> {
+        try {
+          val adapter = getBluetoothAdapter()
+          if (adapter != null) {
+            val bondedDevices = adapter.bondedDevices
+            val deviceList = mutableListOf<Map<String, String>>()
+            
+            bondedDevices?.forEach { device ->
+              deviceList.add(mapOf(
+                "name" to (device.name ?: "Unknown Device"),
+                "address" to device.address
+              ))
+            }
+            
+            result.success(deviceList)
+          } else {
+            result.error("NO_ADAPTER", "Bluetooth adapter not available", null)
+          }
+        } catch (e: Exception) {
+          result.error("GET_DEVICES_ERROR", e.message, null)
+        }
+      }
       "sendMessage" -> {
         val message = call.argument<String>("message")
         if (message != null) {

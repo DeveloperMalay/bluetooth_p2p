@@ -76,18 +76,23 @@ class BluetoothP2P {
 
 ### Setting up Two Phones
 
+**Prerequisites:**
+- Pair both phones in Android Bluetooth settings first
+- Grant all Bluetooth permissions when prompted
+
 **Phone A (Server):**
 1. Install the example app
 2. Tap "1. Request Permissions" 
 3. Tap "2. Get Bluetooth Info"
-4. Tap "3b. Start Server" 
+4. Tap "3a. Make Discoverable" (makes device discoverable)
+5. Tap "3c. Start Server" (starts listening for connections)
 
 **Phone B (Client):**
 1. Install the example app  
 2. Tap "1. Request Permissions"
 3. Tap "2. Get Bluetooth Info" 
-4. Tap "3a. Start Discovery"
-5. Tap "4. Connect to Device" (modify with actual discovered address)
+4. Tap "3b. Start Discovery" (finds paired devices)
+5. Tap "4. Connect to [Device Name]" (connect to Phone A)
 6. Tap "5. Send Test Message"
 
 ### Available Methods
@@ -95,7 +100,9 @@ class BluetoothP2P {
 | Method | Description |
 |--------|-------------|
 | `getBluetoothAdapter()` | Get adapter info (enabled, name, address) |
+| `makeDiscoverable()` | Make device discoverable for 5 minutes |
 | `startDiscovery()` | Start scanning for nearby devices |
+| `getDiscoveredDevices()` | Get list of paired/bonded devices |
 | `startServer()` | Start listening for connections |
 | `connectToDevice(address)` | Connect to a specific device |
 | `sendMessage(message)` | Send text message to connected device |
