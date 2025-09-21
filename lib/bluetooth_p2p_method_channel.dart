@@ -16,21 +16,27 @@ class MethodChannelBluetoothP2p extends BluetoothP2pPlatform {
   }
 
   @override
+  Future<int> getBatteryPercentage() async {
+    final percentage = await methodChannel.invokeMethod<int>('getBatteryPercentage');
+    return percentage ?? 0;
+  }
+
+  @override
   Future<bool> isBluetoothEnabled() async {
     final enabled = await methodChannel.invokeMethod<bool>('isBluetoothEnabled');
     return enabled ?? false;
   }
 
   @override
-  Future<String> startDiscovery() async {
-    final result = await methodChannel.invokeMethod<String>('startDiscovery');
-    return result ?? 'Failed to start discovery';
+  Future<String> startBluetoothScan() async {
+    final result = await methodChannel.invokeMethod<String>('startBluetoothScan');
+    return result ?? 'Failed to start scan';
   }
 
   @override
-  Future<String> stopDiscovery() async {
-    final result = await methodChannel.invokeMethod<String>('stopDiscovery');
-    return result ?? 'Failed to stop discovery';
+  Future<String> stopBluetoothScan() async {
+    final result = await methodChannel.invokeMethod<String>('stopBluetoothScan');
+    return result ?? 'Failed to stop scan';
   }
 
   @override
