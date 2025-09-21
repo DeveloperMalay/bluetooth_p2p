@@ -156,33 +156,58 @@ Note: The app will request these permissions when using Bluetooth features.''';
     });
 
     try {
-      final result = await _channel.invokeMethod('startDiscovery');
+      // Start the discovery process
+      final discoveryResult = await _channel.invokeMethod('startDiscovery');
       setState(() {
-        _status = '🔍 $result\nDiscovering nearby devices...';
+        _status = '🔍 $discoveryResult\nScanning for devices...';
       });
       
-      // Simulate discovering some devices (in real implementation, you'd listen for discovery events)
-      Future.delayed(const Duration(seconds: 3), () {
-        if (mounted && _isDiscovering) {
+      // Wait a bit for discovery to run, then get the discovered/bonded devices
+      await Future.delayed(const Duration(seconds: 3));
+      
+      if (mounted && _isDiscovering) {
+        try {
+          // Get the actual discovered/bonded devices
+          final devices = await _channel.invokeMethod('getDiscoveredDevices');
+          
           setState(() {
-            _discoveredDevices.addAll([
-              {'name': 'Sample Device 1', 'address': '00:11:22:33:44:55'},
-              {'name': 'Sample Device 2', 'address': '00:66:77:88:99:AA'},
-            ]);
-            _status += '\n\n📱 Found ${_discoveredDevices.length} devices:\n';
-            for (var device in _discoveredDevices) {
-              _status += '• ${device['name']} (${device['address']})\n';
+            _discoveredDevices.clear();
+            
+            if (devices is List) {
+              for (var device in devices) {
+                if (device is Map) {
+                  final deviceMap = Map<String, dynamic>.from(device);
+                  _discoveredDevices.add({
+                    'name': deviceMap['name']?.toString() ?? 'Unknown Device',
+                    'address': deviceMap['address']?.toString() ?? 'Unknown Address',
+                  });
+                }
+              }
+            }
+            
+            if (_discoveredDevices.isNotEmpty) {
+              _status += '\n\n📱 Found ${_discoveredDevices.length} available device(s):\n';
+              for (var device in _discoveredDevices) {
+                _status += '• ${device['name']} (${device['address']})\n';
+              }
+              _status += '\nNote: These are previously paired/bonded devices. For new devices, ensure they are paired in system Bluetooth settings.';
+            } else {
+              _status += '\n\n📱 No paired devices found.\n\nTo connect to a device:\n1. Go to Android Bluetooth settings\n2. Pair with the target device first\n3. Return to this app and try discovery again';
             }
           });
+        } catch (e) {
+          setState(() {
+            _status += '\n❌ Error getting devices: $e';
+          });
         }
-      });
+      }
       
       // Auto-stop discovery after 12 seconds
       Future.delayed(const Duration(seconds: 12), () {
         if (mounted && _isDiscovering) {
           setState(() {
             _isDiscovering = false;
-            _status += '\n✅ Discovery completed';
+            _status += '\n\n✅ Discovery completed';
           });
         }
       });
